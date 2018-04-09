@@ -700,7 +700,7 @@ with lib;
 
       storage = {
         size = mkOption {
-          description = "Size of storage for redis per replica";
+          description = "Size of storage and memory for redis per replica";
           type = types.str;
           default = "500Mi";
         };
@@ -714,7 +714,7 @@ with lib;
     };
 
     config = {
-      kubernetes.resources.configMaps.redis.data."redis.conf" = redisConfig;
+      kubernetes.resources.configMaps.${name}.data."redis.conf" = redisConfig;
 
       kubernetes.resources.deployments.redis-proxy = {
         metadata.name = "${name}-proxy";
@@ -791,7 +791,7 @@ with lib;
                       ${optionalString (config.password != null) "--requirepass $REDIS_PASSWORD"}
                   else
                     exec redis-server /etc/redis/redis.conf \
-                      --slaveof redis-node-0.redis-node 6379 \
+                      --slaveof ${name}-node-0.${name}-node 6379 \
                       ${optionalString (config.password != null) "--requirepass $REDIS_PASSWORD"} \
                       ${optionalString (config.password != null) "--masterauth $REDIS_PASSWORD"}
                   fi
@@ -812,8 +812,9 @@ with lib;
 
                 resources.requests = {
                   cpu = "100m";
-                  memory = "256Mi";
+                  memory = config.storage.size;
                 };
+                resources.limits.memory = config.storage.size;
 
                 readinessProbe = {
                   exec.command = ["sh" "-c" ''
@@ -863,7 +864,7 @@ with lib;
                 command = [
                   "redis-sentinel" "/etc/redis/redis.conf"
                   "--port" "26379"
-                  "--sentinel" "monitor" "redis" "redis-node-0.redis-node" "6379" "2"
+                  "--sentinel" "monitor" "redis" "${name}-node-0.${name}-node" "6379" "2"
                   "--sentinel" "down-after-milliseconds" "redis" "5000"
                 ] ++ optionals (config.password != null) ["--sentinel" "auth-pass" "redis" "$(REDIS_PASSWORD)"];
                 env.REDIS_PASSWORD = mkIf (config.password != null) (secretToEnv config.password);
@@ -895,7 +896,7 @@ with lib;
                 # we can't simply achive this with k8s statefulsets
                 livenessProbe = {
                   exec.command = ["sh" "-c" ''
-                    redis-cli ${optionalString (config.password != null) "-a $REDIS_PASSWORD"} -p 26379 info | grep master0 | grep ok
+                    redis-cli ${optionalString (config.password != null) "-a $REDIS_PASSWORD"} -p 26379 info | grep master0 | grep -i 'ok\|up'
                   ''];
                   initialDelaySeconds = 120; # wait for masters to be up for at least 2minutes
                   timeoutSeconds = 5;
